@@ -1,11 +1,8 @@
-// Dependency-free version for Vercel
-// Reads tokens.csv, sends Expo notifications in batches of 50
-
-import fs from "fs";
+// /api/send-notification.js
 import https from "https";
+import { tokens } from "../../tokens.js";
 
 const EXPO_ENDPOINT = "https://exp.host/--/api/v2/push/send";
-const TOKENS_FILE = "tokens.csv";
 const BATCH_SIZE = 50;
 
 export default async function handler(req, res) {
@@ -18,22 +15,10 @@ export default async function handler(req, res) {
     let body = "";
     for await (const chunk of req) body += chunk;
     const data = JSON.parse(body || "{}");
-    const title = data.title || "New Notification";
-    const messageBody = data.body || "You have a new update!";
+    const title = data.title || "New Notification 🚀";
+    const bodyText = data.body || "Check out the latest update!";
 
-    // Read tokens.csv manually
-    if (!fs.existsSync(TOKENS_FILE)) {
-      res.writeHead(200, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ message: "No tokens.csv found" }));
-    }
-
-    const lines = fs.readFileSync(TOKENS_FILE, "utf8").trim().split("\n");
-    const tokens = lines
-      .slice(1)
-      .map((l) => l.trim())
-      .filter((l) => l && l.startsWith("ExponentPushToken"));
-
-    if (tokens.length === 0) {
+    if (!tokens || tokens.length === 0) {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ message: "No tokens found" }));
     }
@@ -49,10 +34,8 @@ export default async function handler(req, res) {
       const messages = batch.map((token) => ({
         to: token,
         title,
-        body: messageBody,
-        data: {
-          link: "https://play.google.com/store/apps/details?id=com.rknldeals.dealstream",
-        },
+        body: bodyText,
+        data: { link: "https://play.google.com/store/apps/details?id=com.rknldeals.dealstream" },
         channelId: "default",
       }));
 
