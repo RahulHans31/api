@@ -1,21 +1,20 @@
-// /api/add-token.js
+import fs from "fs";
+import path from "path";
 import { tokens } from "./tokens.js";
 
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    res.writeHead(405, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify({ error: "Only POST allowed" }));
-  }
-
   try {
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    const data = JSON.parse(body || "{}");
-    const token = data.token;
+    if (req.method !== "GET") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "Only GET allowed" }));
+    }
 
-    if (!token || !token.startsWith("ExponentPushToken[")) {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const token = url.searchParams.get("token");
+
+    if (!token) {
       res.writeHead(400, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ error: "Invalid token" }));
+      return res.end(JSON.stringify({ error: "Missing token query param" }));
     }
 
     if (tokens.includes(token)) {
@@ -23,15 +22,15 @@ export default async function handler(req, res) {
       return res.end(JSON.stringify({ message: "Token already exists" }));
     }
 
+    tokens.push(token);
+    const filePath = path.join(process.cwd(), "api", "tokens.js");
+    const newContent = `export const tokens = ${JSON.stringify(tokens, null, 2)};\n`;
+    fs.writeFileSync(filePath, newContent);
+
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(
-      JSON.stringify({
-        message:
-          "Since Vercel cannot modify files at runtime, please add this token manually to tokens.js and redeploy.",
-        token,
-      })
-    );
+    res.end(JSON.stringify({ message: "✅ Token added successfully" }));
   } catch (err) {
+    console.error(err);
     res.writeHead(500, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: err.message }));
   }
