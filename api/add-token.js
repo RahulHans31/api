@@ -1,5 +1,5 @@
 // /api/add-token.js
-import { tokens } from "../../tokens.js";
+import { tokens } from "./tokens.js";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
