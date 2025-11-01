@@ -1,39 +1,44 @@
+// Dependency-free endpoint to append new tokens to tokens.csv
+
 import fs from "fs";
-import csv from "csv-parser";
-import { NextResponse } from "next/server";
 
 const TOKENS_FILE = "tokens.csv";
 
-export async function POST(req) {
+export default async function handler(req, res) {
   try {
-    const { token } = await req.json();
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "Only POST allowed" }));
+    }
+
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const data = JSON.parse(body || "{}");
+    const token = data.token;
 
     if (!token || !token.startsWith("ExponentPushToken[")) {
-      return NextResponse.json({ error: "Invalid or missing token" }, { status: 400 });
+      res.writeHead(400, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "Invalid token" }));
     }
 
-    // Read existing tokens
-    const existingTokens = await new Promise((resolve, reject) => {
-      const results = [];
-      fs.createReadStream(TOKENS_FILE)
-        .pipe(csv())
-        .on("data", (row) => {
-          if (row.token) results.push(row.token);
-        })
-        .on("end", () => resolve(results))
-        .on("error", reject);
-    });
-
-    if (existingTokens.includes(token)) {
-      return NextResponse.json({ message: "Token already exists" });
+    // Ensure file exists
+    if (!fs.existsSync(TOKENS_FILE)) {
+      fs.writeFileSync(TOKENS_FILE, "token\n");
     }
 
-    // Append new token
+    const lines = fs.readFileSync(TOKENS_FILE, "utf8").trim().split("\n");
+    const tokens = lines.slice(1).map((l) => l.trim());
+
+    if (tokens.includes(token)) {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ message: "Token already exists" }));
+    }
+
     fs.appendFileSync(TOKENS_FILE, `\n${token}`);
-
-    return NextResponse.json({ message: "Token added successfully", token });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ message: "✅ Token added", token }));
   } catch (err) {
-    console.error("Error adding token:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: err.message }));
   }
 }
