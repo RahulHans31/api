@@ -1,100 +1,99 @@
+// Dependency-free version for Vercel
+// Reads tokens.csv, sends Expo notifications in batches of 50
+
 import fs from "fs";
-import { NextResponse } from "next/server";
-import fetch from "node-fetch";
+import https from "https";
 
 const EXPO_ENDPOINT = "https://exp.host/--/api/v2/push/send";
-const TOKENS_FILE = "tokens.csv"; // or "/tmp/tokens.csv" if you plan to modify it
+const TOKENS_FILE = "tokens.csv";
 const BATCH_SIZE = 50;
 
-// Helper to read tokens without csv-parser
-function readTokens() {
+export default async function handler(req, res) {
   try {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: "Only POST allowed" }));
+    }
+
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const data = JSON.parse(body || "{}");
+    const title = data.title || "New Notification";
+    const messageBody = data.body || "You have a new update!";
+
+    // Read tokens.csv manually
     if (!fs.existsSync(TOKENS_FILE)) {
-      console.warn("⚠️ tokens.csv not found");
-      return [];
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ message: "No tokens.csv found" }));
     }
 
     const lines = fs.readFileSync(TOKENS_FILE, "utf8").trim().split("\n");
-
-    // skip header line, ensure proper formatting
     const tokens = lines
       .slice(1)
-      .map((line) => line.trim())
-      .filter((line) => line && line.startsWith("ExponentPushToken"));
+      .map((l) => l.trim())
+      .filter((l) => l && l.startsWith("ExponentPushToken"));
 
-    console.log(`✅ Loaded ${tokens.length} tokens`);
-    return tokens;
-  } catch (err) {
-    console.error("Error reading tokens.csv:", err);
-    return [];
-  }
-}
-
-export async function POST(req) {
-  try {
-    const { title, body } = await req.json();
-
-    if (!title || !body) {
-      return NextResponse.json(
-        { error: "Missing title or body in request" },
-        { status: 400 }
-      );
-    }
-
-    const tokens = readTokens();
     if (tokens.length === 0) {
-      return NextResponse.json(
-        { message: "No tokens found in tokens.csv" },
-        { status: 200 }
-      );
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ message: "No tokens found" }));
     }
 
     const batches = [];
-    for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
+    for (let i = 0; i < tokens.length; i += BATCH_SIZE)
       batches.push(tokens.slice(i, i + BATCH_SIZE));
-    }
 
     const results = [];
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
-
-      // Prepare payload — must be an array of messages
       const messages = batch.map((token) => ({
         to: token,
         title,
-        body,
+        body: messageBody,
         data: {
           link: "https://play.google.com/store/apps/details?id=com.rknldeals.dealstream",
         },
         channelId: "default",
       }));
 
-      const response = await fetch(EXPO_ENDPOINT, {
+      const payload = JSON.stringify(messages);
+      const options = new URL(EXPO_ENDPOINT);
+      const reqOpts = {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Content-Length": Buffer.byteLength(payload),
         },
-        body: JSON.stringify(messages),
-      });
+      };
 
-      const data = await response.json();
-      console.log(`📦 Sent batch ${i + 1}/${batches.length}`, data);
+      const response = await new Promise((resolve, reject) => {
+        const request = https.request(options, reqOpts, (r) => {
+          let resp = "";
+          r.on("data", (d) => (resp += d));
+          r.on("end", () => resolve({ status: r.statusCode, body: resp }));
+        });
+        request.on("error", reject);
+        request.write(payload);
+        request.end();
+      });
 
       results.push({
         batch: i + 1,
         count: batch.length,
-        response: data,
+        response: response.body,
       });
     }
 
-    return NextResponse.json({
-      message: "✅ Notifications sent successfully!",
-      total_batches: batches.length,
-      results,
-    });
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        message: "✅ Notifications sent successfully!",
+        total_batches: batches.length,
+        results,
+      })
+    );
   } catch (err) {
-    console.error("Error in send-notification:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: err.message }));
   }
 }
