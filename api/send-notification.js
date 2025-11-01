@@ -1,6 +1,6 @@
 // /api/send-notification.js
 import https from "https";
-import { tokens } from ./tokens.js";
+import { tokens } from "./tokens.js";
 
 const EXPO_ENDPOINT = "https://exp.host/--/api/v2/push/send";
 const BATCH_SIZE = 50;
