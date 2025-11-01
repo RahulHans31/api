@@ -12,17 +12,32 @@ export default async function handler(req, res) {
       return res.end(JSON.stringify({ error: "Only POST allowed" }));
     }
 
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    const data = JSON.parse(body || "{}");
-    const title = data.title || "New Notification 🚀";
-    const bodyText = data.body || "Check out the latest update!";
+    // --- Read body safely ---
+    let rawBody = "";
+    for await (const chunk of req) rawBody += chunk;
+
+    let data = {};
+    try {
+      data = JSON.parse(rawBody || "{}");
+    } catch (e) {
+      console.error("❌ Invalid JSON:", rawBody);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      return res.end(
+        JSON.stringify({ error: "Invalid JSON body", raw: rawBody })
+      );
+    }
+
+    const title = data.title || "🔥 New Update!";
+    const bodyText = data.body || "Check out the latest deal!";
+    const playStoreLink =
+      "https://play.google.com/store/apps/details?id=com.rknldeals.dealstream";
 
     if (!tokens || tokens.length === 0) {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ message: "No tokens found" }));
     }
 
+    // --- Batch tokens ---
     const batches = [];
     for (let i = 0; i < tokens.length; i += BATCH_SIZE)
       batches.push(tokens.slice(i, i + BATCH_SIZE));
@@ -35,29 +50,36 @@ export default async function handler(req, res) {
         to: token,
         title,
         body: bodyText,
-        data: { link: "https://play.google.com/store/apps/details?id=com.rknldeals.dealstream" },
+        data: { link: playStoreLink },
         channelId: "default",
       }));
 
       const payload = JSON.stringify(messages);
-      const options = new URL(EXPO_ENDPOINT);
-      const reqOpts = {
+
+      const options = {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "application/json",
           "Content-Length": Buffer.byteLength(payload),
         },
       };
 
+      // --- Make HTTPS request ---
       const response = await new Promise((resolve, reject) => {
-        const request = https.request(options, reqOpts, (r) => {
+        const reqExpo = https.request(EXPO_ENDPOINT, options, (r) => {
           let resp = "";
-          r.on("data", (d) => (resp += d));
-          r.on("end", () => resolve({ status: r.statusCode, body: resp }));
+          r.on("data", (chunk) => (resp += chunk));
+          r.on("end", () =>
+            resolve({
+              status: r.statusCode,
+              body: resp,
+            })
+          );
         });
-        request.on("error", reject);
-        request.write(payload);
-        request.end();
+        reqExpo.on("error", (err) => reject(err));
+        reqExpo.write(payload);
+        reqExpo.end();
       });
 
       results.push({
@@ -65,6 +87,8 @@ export default async function handler(req, res) {
         count: batch.length,
         response: response.body,
       });
+
+      console.log(`📤 Sent batch ${i + 1}/${batches.length}`);
     }
 
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -76,7 +100,12 @@ export default async function handler(req, res) {
       })
     );
   } catch (err) {
+    console.error("💥 Error in send-notification.js:", err);
     res.writeHead(500, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: err.message }));
+    res.end(
+      JSON.stringify({
+        error: err.message || "Internal server error",
+      })
+    );
   }
 }
